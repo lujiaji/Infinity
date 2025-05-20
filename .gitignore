@@ -46,3 +46,4 @@ ref.py
 wandb
 .DS_Store
 bpe_simple_vocab_16e6.txt.gz
+conf.py
