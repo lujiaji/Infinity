@@ -135,8 +135,9 @@ test_fid() {
     --text_channels ${text_channels} \
     --apply_spatial_patchify ${apply_spatial_patchify} \
     --cfg_insertion_layer ${cfg_insertion_layer} \
-    --coco30k_prompts 1 \
-    --save4fid_eval 0 \
+    --coco30k_prompts 0 \
+    --save4fid_eval 1 \
+    --jsonl_filepath ${jsonl_filepath} \
     --long_caption_fid ${long_caption_fid} \
     --out_dir  ${out_dir} \
 
@@ -146,90 +147,96 @@ test_fid() {
     ${out_dir}/gt | tee ${out_dir}/log.txt
 }
 
-test_val_loss() {
-    ${python_ext} evaluation/validation_loss/validation_loss.py \
-    --cfg ${cfg} \
-    --tau ${tau} \
-    --pn ${pn} \
-    --model_path ${infinity_model_path} \
-    --vae_type ${vae_type} \
-    --vae_path ${vae_path} \
-    --add_lvl_embeding_only_first_block ${add_lvl_embeding_only_first_block} \
-    --use_bit_label ${use_bit_label} \
-    --model_type ${model_type} \
-    --rope2d_each_sa_layer ${rope2d_each_sa_layer} \
-    --rope2d_normalized_by_hw ${rope2d_normalized_by_hw} \
-    --use_scale_schedule_embedding ${use_scale_schedule_embedding} \
-    --cfg ${cfg} \
-    --tau ${tau} \
-    --checkpoint_type ${checkpoint_type} \
-    --text_encoder_ckpt ${text_encoder_ckpt} \
-    --text_channels ${text_channels} \
-    --apply_spatial_patchify ${apply_spatial_patchify} \
-    --cfg_insertion_layer ${cfg_insertion_layer} \
-    --save_dir ${out_dir} \
-    --reweight_loss_by_scale ${reweight_loss_by_scale} \
-    --meta_folder ${jsonl_folder} \
-    --noise_apply_strength ${noise_apply_strength} \
-    --bf16 0 \
-    --log_freq 10
+test_DPG() {
+    # generate combined imgs
+
+    # ${python_ext} evaluation/DPG/infer4eval.py \
+    # --cfg ${cfg} \
+    # --tau ${tau} \
+    # --pn ${pn} \
+    # --model_path ${infinity_model_path} \
+    # --vae_type ${vae_type} \
+    # --vae_path ${vae_path} \
+    # --add_lvl_embeding_only_first_block ${add_lvl_embeding_only_first_block} \
+    # --use_bit_label ${use_bit_label} \
+    # --model_type ${model_type} \
+    # --rope2d_each_sa_layer ${rope2d_each_sa_layer} \
+    # --rope2d_normalized_by_hw ${rope2d_normalized_by_hw} \
+    # --use_scale_schedule_embedding ${use_scale_schedule_embedding} \
+    # --cfg ${cfg} \
+    # --tau ${tau} \
+    # --checkpoint_type ${checkpoint_type} \
+    # --text_encoder_ckpt ${text_encoder_ckpt} \
+    # --text_channels ${text_channels} \
+    # --apply_spatial_patchify ${apply_spatial_patchify} \
+    # --cfg_insertion_layer ${cfg_insertion_layer} \
+    # --outdir ${out_dir}/images \
+    
+    #run DPG
+    bash /home/jiaji_lu/AR/Infinity/evaluation/DPG/dist_eval.sh ${img_fold} 512
 }
-
-
+MODEL_SIZE=$1
 python_ext=python3
 pip_ext=pip3
 
 # set arguments for inference
 pn=1M
-model_type=infinity_2b
 use_scale_schedule_embedding=0
 use_bit_label=1
-checkpoint_type='torch'
-infinity_model_path=/data/boxunxu/Infinity/infinity_2b_reg.pth
-# infinity_model_path=/data/jiaji_lu/Infinity/infinity_8b_weights/model-00001-of-00004.safetensors
-out_dir_root=output/infinity_2b_evaluation
-vae_type=32
-vae_path=/data/boxunxu/Infinity/infinity_vae_d32reg.pth
-cfg=4
+cfg=3
 tau=1
 rope2d_normalized_by_hw=2
 add_lvl_embeding_only_first_block=1
 rope2d_each_sa_layer=1
 text_encoder_ckpt=/data/boxunxu/Infinity/flan-t5-xl
 text_channels=2048
-apply_spatial_patchify=0
 cfg_insertion_layer=0
 sub_fix=cfg${cfg}_tau${tau}_cfg_insertion_layer${cfg_insertion_layer}
 
+if [[ "$MODEL_SIZE" == "2b" ]]; then
+    echo "[running 2b Infinity]"
+    model_type=infinity_2b
+    checkpoint_type='torch'
+    infinity_model_path=/data/boxunxu/Infinity/infinity_2b_reg.pth
+    out_dir_root=output/infinity_2b_evaluation
+    vae_type=32
+    vae_path=/data/boxunxu/Infinity/infinity_vae_d32reg.pth
+    apply_spatial_patchify=0
+else
+    echo "[running 8b Infinity]"
+    model_type=infinity_8b
+    checkpoint_type='torch_shard'
+    infinity_model_path=/data/jiaji_lu/Infinity/infinity_8b_weights
+    out_dir_root=output/infinity_8b_evaluation
+    vae_type=14
+    vae_path=/data/jiaji_lu/Infinity/infinity_vae_d56_f8_14_patchify.pth
+    apply_spatial_patchify=1
+fi
+
 export PYTHONPATH=.
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+export CUDA_VISIBLE_DEVICES=7  #remember to change GPU!!!
 
 # ImageReward
 out_dir=${out_dir_root}/image_reward_${sub_fix}
-# infer_eval_image_reward > IR.txt 2>&1
+# infer_eval_image_reward > results_txt/${MODEL_SIZE}/IR.txt 2>&1
 
 # HPS v2.1
 out_dir=${out_dir_root}/hpsv21_${sub_fix}
-# infer_eval_hpsv21 > HPS.txt 2>&1
+# infer_eval_hpsv21 > results_txt/${MODEL_SIZE}/HPS.txt 2>&1
 
 # GenEval
 rewrite_prompt=0
 out_dir=${out_dir_root}/gen_eval_${sub_fix}_rewrite_prompt${rewrite_prompt}_round2_real_rewrite
-# test_gen_eval > gen_eval.txt 2>&1
+# test_gen_eval > results_txt/${MODEL_SIZE}/gen_eval.txt 2>&1
 
 # long caption fid
 long_caption_fid=1
-# jsonl_filepath='/home/jiaji_lu/AR/Infinity/output/infinity_2b_evaluation/val_long_caption_fid_cfg4_tau1_cfg_insertion_layer0/meta_info.jsonl'
+jsonl_filepath='/home/jiaji_lu/AR/Infinity/meta_info.jsonl'
 out_dir=${out_dir_root}/val_long_caption_fid_${sub_fix}
-# mkdir -p ${out_dir}
-# rm -rf ${out_dir}
-# test_fid > fid.txt 2>&1
-
-# test val loss
-out_dir=${out_dir_root}/val_loss_${sub_fix}
-reweight_loss_by_scale=0
-jsonl_folder='/home/jiaji_lu/AR/Infinity/output/infinity_2b_evaluation/val_loss_cfg4_tau1_cfg_insertion_layer0/meta_josn.jsonl'
-noise_apply_strength=0.2
-test_val_loss > val_loss.txt 2>&1
+# test_fid > results_txt/${MODEL_SIZE}/fid.txt 2>&1
 
 #DPG
+out_dir=${out_dir_root}/DPG_${sub_fix}
+img_fold=/home/jiaji_lu/AR/Infinity/${out_dir_root}/DPG_cfg3_tau1_cfg_insertion_layer0/images/dpg_images
+test_DPG > results_txt/${MODEL_SIZE}/DPG.txt 2>&1
+# python tools/fid_score.py /home/jiaji_lu/AR/Infinity/output/infinity_2b_evaluation/val_long_caption_fid_cfg3_tau1_cfg_insertion_layer0/pred /home/jiaji_lu/AR/Infinity/val2014 | tee log.txt
