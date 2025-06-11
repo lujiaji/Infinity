@@ -37,7 +37,7 @@ output
 *.tsv
 *.mp4
 output/*
-results/
+results_txt/
 *.JPEG
 debug/
 weights
@@ -47,3 +47,4 @@ wandb
 .DS_Store
 bpe_simple_vocab_16e6.txt.gz
 conf.py
+val2014/
