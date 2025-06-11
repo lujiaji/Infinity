@@ -102,6 +102,8 @@ class Infinity(nn.Module):
         always_training_scales=20,
         apply_spatial_patchify = 0,
         inference_mode=False,
+        q_bits:int=8,
+        q_dim:str='per-head+per-dim',
     ):
         # set hyperparameters
         self.C = embed_dim
@@ -127,7 +129,8 @@ class Infinity(nn.Module):
         self.train_h_div_w_list = train_h_div_w_list if train_h_div_w_list else h_div_w_templates
         self.video_frames = video_frames
         self.always_training_scales = always_training_scales
-
+        self.q_bits = q_bits
+        self.q_dim = q_dim
         assert add_lvl_embeding_only_first_block in [0,1]
         self.add_lvl_embeding_only_first_block = add_lvl_embeding_only_first_block
         assert rope2d_each_sa_layer in [0,1]
@@ -260,6 +263,9 @@ class Infinity(nn.Module):
                 swiglu=swiglu, customized_flash_attn=self.customized_flash_attn, fused_mlp=fused_mlp, fused_norm_func=fused_norm_func,
                 checkpointing_sa_only=self.checkpointing == 'self-attn',
                 use_flex_attn=use_flex_attn, batch_size=batch_size, pad_to_multiplier=pad_to_multiplier, rope2d_normalized_by_hw=rope2d_normalized_by_hw,
+                block_idx=block_idx,
+                q_bits=self.q_bits,
+                q_dim=self.q_dim,
             )
             self.unregistered_blocks.append(block)
         

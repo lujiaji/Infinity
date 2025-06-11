@@ -20,6 +20,8 @@ from flash_attn import flash_attn_varlen_kvpacked_func  # qkv: N3Hc, ret: NHc
 
 from torch.nn.functional import scaled_dot_product_attention as slow_attn    # q, k, v: BHLc
 
+from ljj_pl.kv_PTQ import KV_PTQ
+
 # Import flash_attn's fused ops
 try:
     from flash_attn.ops.layer_norm import dropout_add_layer_norm
@@ -195,8 +197,9 @@ class FFNSwiGLU(nn.Module):
 class SelfAttention(nn.Module):
     def __init__(
         self, embed_dim=768, num_heads=12,
-        proj_drop=0., tau=1, cos_attn=False, customized_flash_attn=True, use_flex_attn=False, 
-        batch_size=2, pad_to_multiplier=1, rope2d_normalized_by_hw=0,
+        proj_drop=0., tau=1, cos_attn=False, customized_flash_attn=False, use_flex_attn=False, 
+        batch_size=2, pad_to_multiplier=1, rope2d_normalized_by_hw=0, block_idx=None,
+        q_bits=8, q_dim='per-head+per-dim',
     ):
         """
         :param embed_dim: model's width
@@ -238,12 +241,22 @@ class SelfAttention(nn.Module):
 
         self.rope2d_normalized_by_hw = rope2d_normalized_by_hw
 
+        self.block_idx = block_idx
+        self.q_bits = q_bits
+        self.q_dim = q_dim
+        self.kv_ptq=None
+
     
     def kv_caching(self, enable: bool): # kv caching: only used during inference
         self.caching = enable
         self.cached_k = None
         self.cached_v = None
-    
+        """======"""
+        if enable:
+            self.kv_ptq = KV_PTQ(k=None,v=None,q_bits=self.q_bits,dim_cat=1,q_dim=self.q_dim,blk_idx=self.block_idx,use_diff_bits=False)
+        else:
+            del self.kv_ptq
+        """======"""
     # NOTE: attn_bias_or_two_vector is None during inference
     def forward(self, x, attn_bias_or_two_vector: Union[torch.Tensor, Tuple[torch.IntTensor, torch.IntTensor]], attn_fn=None, scale_schedule=None, rope2d_freqs_grid=None, scale_ind=0):
         """
@@ -277,7 +290,7 @@ class SelfAttention(nn.Module):
         qkv = F.linear(input=x, weight=self.mat_qkv.weight, bias=torch.cat((self.q_bias, self.zero_k_bias, self.v_bias))).view(B, L, 3, self.num_heads, self.head_dim)  # BL3Hc
         if self.using_flash: q, k, v = qkv.unbind(dim=2); L_dim = 1           # q or k or v: all are shaped in (B:batch_size, L:seq_len, H:heads, c:head_dim)
         else: q, k, v = qkv.permute(2, 0, 3, 1, 4).unbind(dim=0); L_dim = 2   # q or k or v: all are shaped in (B:batch_size, H:heads, L:seq_len, c:head_dim)
-        
+
         if self.cos_attn:   # always True
             scale_mul = self.scale_mul_1H11.clamp_max(self.max_scale_mul).exp() # 11H1 (flash), or 1H11 (not flash)
             q = F.normalize(q, dim=-1, eps=1e-12).mul(scale_mul).contiguous()   # fp32
@@ -289,10 +302,16 @@ class SelfAttention(nn.Module):
             v = v.contiguous()      # bf16
         if rope2d_freqs_grid is not None:
             q, k = apply_rotary_emb(q, k, scale_schedule, rope2d_freqs_grid, self.pad_to_multiplier, self.rope2d_normalized_by_hw, scale_ind) #, freqs_cis=freqs_cis)
-        if self.caching:    # kv caching: only used during inference
-            if self.cached_k is None: self.cached_k = k; self.cached_v = v
-            else: k = self.cached_k = torch.cat((self.cached_k, k), dim=L_dim); v = self.cached_v = torch.cat((self.cached_v, v), dim=L_dim)
-        
+        # if self.caching:    # kv caching: only used during inference
+        #     if self.cached_k is None: self.cached_k = k; self.cached_v = v
+        #     else: k = self.cached_k = torch.cat((self.cached_k, k), dim=L_dim); v = self.cached_v = torch.cat((self.cached_v, v), dim=L_dim)
+        """===========do Q here==========="""
+        self.kv_ptq.new_k, self.kv_ptq.new_v = k, v
+        self.kv_ptq.dim_cat=L_dim
+        self.kv_ptq.quantized_kv()
+        k,v=self.kv_ptq.use_kv()
+        # print(f'k.shape: {k.shape}, v.shape: {v.shape}\n')
+        """==============================="""
         if self.using_flash:
             if attn_bias_or_two_vector is not None: # training
                 kw = dict(VAR_visible_kvlen=attn_bias_or_two_vector[0], VAR_invisible_qlen=attn_bias_or_two_vector[1])
@@ -409,13 +428,14 @@ class SelfAttnBlock(nn.Module):
         self, embed_dim, kv_dim, cross_attn_layer_scale, cond_dim, act: bool, shared_aln: bool, norm_layer: partial,
         num_heads, mlp_ratio=4., drop=0., drop_path=0., tau=1, cos_attn=False,
         swiglu=False, customized_flash_attn=False, fused_mlp=False, fused_norm_func=None, checkpointing_sa_only=False,
+        block_idx=None,
     ):
         super(SelfAttnBlock, self).__init__()
         self.C, self.D = embed_dim, cond_dim
         self.drop_path_rate = drop_path
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.attn = SelfAttention(
-            embed_dim=embed_dim, num_heads=num_heads, proj_drop=drop, tau=tau, cos_attn=cos_attn, customized_flash_attn=customized_flash_attn, attn_fn = attn_fn
+            embed_dim=embed_dim, num_heads=num_heads, proj_drop=drop, tau=tau, cos_attn=cos_attn, customized_flash_attn=customized_flash_attn, attn_fn = attn_fn, block_idx=block_idx
         )
         self.using_swiglu = swiglu
         self.ffn = (FFNSwiGLU if swiglu else FFN)(in_features=embed_dim, hidden_features=round(embed_dim * mlp_ratio / 256) * 256, drop=drop, fused_mlp=fused_mlp)
@@ -458,6 +478,7 @@ class CrossAttnBlock(nn.Module):
         num_heads, mlp_ratio=4., drop=0., drop_path=0., tau=1, cos_attn=False,
         swiglu=False, customized_flash_attn=False, fused_mlp=False, fused_norm_func=None, checkpointing_sa_only=False,
         use_flex_attn=False, batch_size=2, pad_to_multiplier=1, apply_rope2d=False, rope2d_normalized_by_hw=False,
+        block_idx=None, q_bits=8, q_dim='per-head+per-dim',
     ):
         super(CrossAttnBlock, self).__init__()
         self.C, self.D = embed_dim, cond_dim
@@ -466,6 +487,7 @@ class CrossAttnBlock(nn.Module):
         self.sa = SelfAttention(
             embed_dim=embed_dim, num_heads=num_heads, proj_drop=drop, tau=tau, cos_attn=cos_attn, customized_flash_attn=customized_flash_attn,
             use_flex_attn=use_flex_attn, batch_size=batch_size, pad_to_multiplier=pad_to_multiplier, rope2d_normalized_by_hw=rope2d_normalized_by_hw,
+            block_idx=block_idx, q_bits=q_bits, q_dim=q_dim,
         )
         self.ca = CrossAttention(embed_dim=embed_dim, kv_dim=kv_dim, num_heads=num_heads, proj_drop=drop, cos_attn=cos_attn)
         self.using_swiglu = swiglu
@@ -541,7 +563,7 @@ class AdaLNBeforeHead(nn.Module):
 
 
 def main():
-    dev = 'cpu' # 'cuda' if torch.cuda.is_available() else 'cpu'
+    dev = 'cuda' if torch.cuda.is_available() else 'cpu' # 'cpu' 
     rng = torch.Generator(device=dev)
     # for Li in ([1, 3, 5], [1, 3]):
     rng.manual_seed(0)

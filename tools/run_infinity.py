@@ -173,6 +173,8 @@ def load_infinity(
     use_flex_attn=False,
     bf16=False,
     checkpoint_type='torch',
+    q_bits:int=8,
+    q_dim:str='per-head+per-dim',
 ):
     print(f'[Loading Infinity]')
     text_maxlen = 512
@@ -181,7 +183,13 @@ def load_infinity(
             vae_local=vae, text_channels=text_channels, text_maxlen=text_maxlen,
             shared_aln=True, raw_scale_schedule=scale_schedule,
             checkpointing='full-block',
-            customized_flash_attn=False,
+            customized_flash_attn=False,   #open flash attn, need flash_attn_2.0, see:
+#>>>>>> Customized FlashAttention2 is not installed or compiled, but specified in args by --flash=1.
+# Set customized_flash_attn = False. <<<<<<
+#>>>>>> `flash_attn_func` is in [line 1140] 
+# [file /home/jiaji_lu/conda/envs/eval/lib/python3.10/site-packages/flash_attn/flash_attn_interface.py] <<<<<<
+#>>>>>> flash_attn_func.__code__.co_varnames=
+# ('q', 'k', 'v', 'dropout_p', 'softmax_scale', 'causal', 'window_size', 'softcap', 'alibi_slopes', 'deterministic', 'return_attn_probs') <<<<<<"""
             fused_norm=True,
             pad_to_multiplier=128,
             use_flex_attn=use_flex_attn,
@@ -193,6 +201,8 @@ def load_infinity(
             apply_spatial_patchify=apply_spatial_patchify,
             inference_mode=True,
             train_h_div_w_list=[1.0],
+            q_bits=q_bits,
+            q_dim=q_dim,
             **model_kwargs,
         ).to(device=device)
         print(f'[you selected Infinity with {model_kwargs=}] model size: {sum(p.numel() for p in infinity_test.parameters())/1e9:.2f}B, bf16={bf16}')
@@ -345,6 +355,8 @@ def load_transformer(vae, args):
         use_flex_attn=args.use_flex_attn,
         bf16=args.bf16,
         checkpoint_type=args.checkpoint_type,
+        q_bits=args.q_bits,
+        q_dim=args.q_dim,
     )
     return infinity
 

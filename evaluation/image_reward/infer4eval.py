@@ -32,6 +32,8 @@ if __name__ == '__main__':
     parser.add_argument('--n_samples', type=int, default=10)
     parser.add_argument('--metadata_file', type=str, default='evaluation/image_reward/benchmark-prompts.json')
     parser.add_argument('--rewrite_prompt', type=int, default=0, choices=[0,1])
+    parser.add_argument("--q_bits", type=int, default=8)
+    parser.add_argument("--q_dim", type=str, default="per-head+per-dim")
     args = parser.parse_args()
 
     # parse cfg
