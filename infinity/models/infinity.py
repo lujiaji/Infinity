@@ -104,6 +104,7 @@ class Infinity(nn.Module):
         inference_mode=False,
         q_bits:int=8,
         q_dim:str='per-head+per-dim',
+        use_diff_bits=False,
     ):
         # set hyperparameters
         self.C = embed_dim
@@ -131,6 +132,7 @@ class Infinity(nn.Module):
         self.always_training_scales = always_training_scales
         self.q_bits = q_bits
         self.q_dim = q_dim
+        self.use_diff_bits = use_diff_bits
         assert add_lvl_embeding_only_first_block in [0,1]
         self.add_lvl_embeding_only_first_block = add_lvl_embeding_only_first_block
         assert rope2d_each_sa_layer in [0,1]
@@ -266,6 +268,7 @@ class Infinity(nn.Module):
                 block_idx=block_idx,
                 q_bits=self.q_bits,
                 q_dim=self.q_dim,
+                use_diff_bits=self.use_diff_bits,
             )
             self.unregistered_blocks.append(block)
         

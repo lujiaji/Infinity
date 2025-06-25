@@ -35,6 +35,7 @@ if __name__ == '__main__':
     parser.add_argument('--load_rewrite_prompt_cache', type=int, default=1, choices=[0,1])
     parser.add_argument("--q_bits", type=int, default=8)
     parser.add_argument("--q_dim", type=str, default="per-head+per-dim")
+    parser.add_argument("--use_diff_bits", type=bool, default=False)
     args = parser.parse_args()
 
     # parse cfg

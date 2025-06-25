@@ -174,7 +174,10 @@ class KV_PTQ:
                 self.cached_s_v=torch.cat((self.cached_s_v, s_v), dim=self.dim_cat)
 
         elif self.q_dim in ('per-head+per-dim','per-head'):
-            do_k,do_v=init_PTQ(None)
+            if self.use_diff_bits and self.block_idx<12:
+                do_k,do_v=init_PTQ(4)
+            else:
+                do_k,do_v=init_PTQ(None)
             self.seq_len.append(self.new_k.shape[self.dim_cat])
             do_k.quantize();do_v.quantize()
             q_k,q_v,s_k,s_v=do_k.quantized_item.contiguous(),do_v.quantized_item.contiguous(),do_k.scale.contiguous(),do_v.scale.contiguous()

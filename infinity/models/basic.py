@@ -21,6 +21,7 @@ from flash_attn import flash_attn_varlen_kvpacked_func  # qkv: N3Hc, ret: NHc
 from torch.nn.functional import scaled_dot_product_attention as slow_attn    # q, k, v: BHLc
 
 from ljj_pl.kv_PTQ import KV_PTQ
+from ljj_pl.mediate import Mediate
 
 # Import flash_attn's fused ops
 try:
@@ -199,7 +200,7 @@ class SelfAttention(nn.Module):
         self, embed_dim=768, num_heads=12,
         proj_drop=0., tau=1, cos_attn=False, customized_flash_attn=False, use_flex_attn=False, 
         batch_size=2, pad_to_multiplier=1, rope2d_normalized_by_hw=0, block_idx=None,
-        q_bits=8, q_dim='per-head+per-dim',
+        q_bits=8, q_dim='per-head+per-dim',use_diff_bits=False,
     ):
         """
         :param embed_dim: model's width
@@ -245,7 +246,7 @@ class SelfAttention(nn.Module):
         self.q_bits = q_bits
         self.q_dim = q_dim
         self.kv_ptq=None
-
+        self.use_diff_bits=use_diff_bits
     
     def kv_caching(self, enable: bool): # kv caching: only used during inference
         self.caching = enable
@@ -253,7 +254,7 @@ class SelfAttention(nn.Module):
         self.cached_v = None
         """======"""
         if enable:
-            self.kv_ptq = KV_PTQ(k=None,v=None,q_bits=self.q_bits,dim_cat=1,q_dim=self.q_dim,blk_idx=self.block_idx,use_diff_bits=False)
+            self.kv_ptq = KV_PTQ(k=None,v=None,q_bits=self.q_bits,dim_cat=1,q_dim=self.q_dim,blk_idx=self.block_idx,use_diff_bits=self.use_diff_bits)
         else:
             del self.kv_ptq
         """======"""
@@ -305,6 +306,12 @@ class SelfAttention(nn.Module):
         # if self.caching:    # kv caching: only used during inference
         #     if self.cached_k is None: self.cached_k = k; self.cached_v = v
         #     else: k = self.cached_k = torch.cat((self.cached_k, k), dim=L_dim); v = self.cached_v = torch.cat((self.cached_v, v), dim=L_dim)
+        """===========do Mediate here==========="""
+        med=Mediate(q,k)
+        q,k,diag,diag_inv=med.do_m()
+        del med
+        """====================================="""
+
         """===========do Q here==========="""
         self.kv_ptq.new_k, self.kv_ptq.new_v = k, v
         self.kv_ptq.dim_cat=L_dim
@@ -428,14 +435,14 @@ class SelfAttnBlock(nn.Module):
         self, embed_dim, kv_dim, cross_attn_layer_scale, cond_dim, act: bool, shared_aln: bool, norm_layer: partial,
         num_heads, mlp_ratio=4., drop=0., drop_path=0., tau=1, cos_attn=False,
         swiglu=False, customized_flash_attn=False, fused_mlp=False, fused_norm_func=None, checkpointing_sa_only=False,
-        block_idx=None,
+        block_idx=None,q_bits=8,q_dim='per-head+per-dim',use_diff_bits=False,
     ):
         super(SelfAttnBlock, self).__init__()
         self.C, self.D = embed_dim, cond_dim
         self.drop_path_rate = drop_path
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.attn = SelfAttention(
-            embed_dim=embed_dim, num_heads=num_heads, proj_drop=drop, tau=tau, cos_attn=cos_attn, customized_flash_attn=customized_flash_attn, attn_fn = attn_fn, block_idx=block_idx
+            embed_dim=embed_dim, num_heads=num_heads, proj_drop=drop, tau=tau, cos_attn=cos_attn, customized_flash_attn=customized_flash_attn, attn_fn = attn_fn, q_bits=q_bits, q_dim=q_dim,block_idx=block_idx,use_diff_bits=use_diff_bits,
         )
         self.using_swiglu = swiglu
         self.ffn = (FFNSwiGLU if swiglu else FFN)(in_features=embed_dim, hidden_features=round(embed_dim * mlp_ratio / 256) * 256, drop=drop, fused_mlp=fused_mlp)
@@ -478,7 +485,7 @@ class CrossAttnBlock(nn.Module):
         num_heads, mlp_ratio=4., drop=0., drop_path=0., tau=1, cos_attn=False,
         swiglu=False, customized_flash_attn=False, fused_mlp=False, fused_norm_func=None, checkpointing_sa_only=False,
         use_flex_attn=False, batch_size=2, pad_to_multiplier=1, apply_rope2d=False, rope2d_normalized_by_hw=False,
-        block_idx=None, q_bits=8, q_dim='per-head+per-dim',
+        block_idx=None, q_bits=8, q_dim='per-head+per-dim',use_diff_bits=False,
     ):
         super(CrossAttnBlock, self).__init__()
         self.C, self.D = embed_dim, cond_dim
@@ -487,7 +494,7 @@ class CrossAttnBlock(nn.Module):
         self.sa = SelfAttention(
             embed_dim=embed_dim, num_heads=num_heads, proj_drop=drop, tau=tau, cos_attn=cos_attn, customized_flash_attn=customized_flash_attn,
             use_flex_attn=use_flex_attn, batch_size=batch_size, pad_to_multiplier=pad_to_multiplier, rope2d_normalized_by_hw=rope2d_normalized_by_hw,
-            block_idx=block_idx, q_bits=q_bits, q_dim=q_dim,
+            block_idx=block_idx, q_bits=q_bits, q_dim=q_dim,use_diff_bits=use_diff_bits,
         )
         self.ca = CrossAttention(embed_dim=embed_dim, kv_dim=kv_dim, num_heads=num_heads, proj_drop=drop, cos_attn=cos_attn)
         self.using_swiglu = swiglu

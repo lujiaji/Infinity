@@ -155,29 +155,29 @@ test_fid() {
 test_DPG() {
     # generate combined imgs
 
-    ${python_ext} evaluation/DPG/infer4eval.py \
-    --cfg ${cfg} \
-    --tau ${tau} \
-    --pn ${pn} \
-    --model_path ${infinity_model_path} \
-    --vae_type ${vae_type} \
-    --vae_path ${vae_path} \
-    --add_lvl_embeding_only_first_block ${add_lvl_embeding_only_first_block} \
-    --use_bit_label ${use_bit_label} \
-    --model_type ${model_type} \
-    --rope2d_each_sa_layer ${rope2d_each_sa_layer} \
-    --rope2d_normalized_by_hw ${rope2d_normalized_by_hw} \
-    --use_scale_schedule_embedding ${use_scale_schedule_embedding} \
-    --cfg ${cfg} \
-    --tau ${tau} \
-    --checkpoint_type ${checkpoint_type} \
-    --text_encoder_ckpt ${text_encoder_ckpt} \
-    --text_channels ${text_channels} \
-    --apply_spatial_patchify ${apply_spatial_patchify} \
-    --cfg_insertion_layer ${cfg_insertion_layer} \
-    --outdir ${out_dir}/images \
-    --q_bits ${q_bits} \
-    --q_dim ${q_dim}
+    # ${python_ext} evaluation/DPG/infer4eval.py \
+    # --cfg ${cfg} \
+    # --tau ${tau} \
+    # --pn ${pn} \
+    # --model_path ${infinity_model_path} \
+    # --vae_type ${vae_type} \
+    # --vae_path ${vae_path} \
+    # --add_lvl_embeding_only_first_block ${add_lvl_embeding_only_first_block} \
+    # --use_bit_label ${use_bit_label} \
+    # --model_type ${model_type} \
+    # --rope2d_each_sa_layer ${rope2d_each_sa_layer} \
+    # --rope2d_normalized_by_hw ${rope2d_normalized_by_hw} \
+    # --use_scale_schedule_embedding ${use_scale_schedule_embedding} \
+    # --cfg ${cfg} \
+    # --tau ${tau} \
+    # --checkpoint_type ${checkpoint_type} \
+    # --text_encoder_ckpt ${text_encoder_ckpt} \
+    # --text_channels ${text_channels} \
+    # --apply_spatial_patchify ${apply_spatial_patchify} \
+    # --cfg_insertion_layer ${cfg_insertion_layer} \
+    # --outdir ${out_dir}/images \
+    # --q_bits ${q_bits} \
+    # --q_dim ${q_dim}
 
     #run DPG
     ${pip_ext} install "huggingface_hub==0.24.7" -U
@@ -204,13 +204,14 @@ sub_fix=cfg${cfg}_tau${tau}_cfg_insertion_layer${cfg_insertion_layer}
 """=================================================================="""
 q_bits=$3
 q_dim='per-head+per-dim'
+use_diff_bits=$4
 """=================================================================="""
 if [[ "$MODEL_SIZE" == "2b" ]]; then
     echo "[running 2b Infinity]"
     model_type=infinity_2b
     checkpoint_type='torch'
     infinity_model_path=/data/boxunxu/Infinity/infinity_2b_reg.pth
-    out_dir_root=output/2b_eval_q${q_bits}_${q_dim}
+    out_dir_root=output/2b_eval_q${q_bits}_${q_dim}_use_diff_bits${use_diff_bits}
     vae_type=32
     vae_path=/data/boxunxu/Infinity/infinity_vae_d32reg.pth
     apply_spatial_patchify=0
@@ -219,7 +220,7 @@ else
     model_type=infinity_8b
     checkpoint_type='torch_shard'
     infinity_model_path=/data/jiaji_lu/Infinity/infinity_8b_weights
-    out_dir_root=output/8b_eval_q${q_bits}_${q_dim}
+    out_dir_root=output/8b_eval_q${q_bits}_${q_dim}_use_diff_bits${use_diff_bits}
     vae_type=14
     vae_path=/data/jiaji_lu/Infinity/infinity_vae_d56_f8_14_patchify.pth
     apply_spatial_patchify=1
@@ -231,29 +232,29 @@ export CUDA_VISIBLE_DEVICES=$2  #remember to change GPU!!!
 
 # ImageReward
 out_dir=${out_dir_root}/image_reward_${sub_fix}
-# infer_eval_image_reward > results_txt/${MODEL_SIZE}/IR_${q_bits}_${q_dim}.txt 2>&1
+# infer_eval_image_reward > results_txt/${MODEL_SIZE}/IR_${q_bits}_${q_dim}_use_diff_bits-${use_diff_bits}.txt 2>&1
 
 # HPS v2.1
 out_dir=${out_dir_root}/hpsv21_${sub_fix}
-# infer_eval_hpsv21 > results_txt/${MODEL_SIZE}/HPS_${q_bits}_${q_dim}.txt 2>&1
+# infer_eval_hpsv21 > results_txt/${MODEL_SIZE}/HPS_${q_bits}_${q_dim}_use_diff_bits-${use_diff_bits}.txt 2>&1
 
 # GenEval
 rewrite_prompt=0
 out_dir=${out_dir_root}/gen_eval_${sub_fix}_rewrite_prompt${rewrite_prompt}_round2_real_rewrite
-test_gen_eval > results_txt/${MODEL_SIZE}/gen_eval_${q_bits}_${q_dim}.txt 2>&1
+# test_gen_eval > results_txt/${MODEL_SIZE}/gen_eval_${q_bits}_${q_dim}_use_diff_bits-${use_diff_bits}.txt 2>&1
 
 # long caption fid
 long_caption_fid=1
 jsonl_filepath='/home/jiaji_lu/AR/Infinity/meta_info.jsonl'
 out_dir=${out_dir_root}/val_long_caption_fid_${sub_fix}
-# test_fid > results_txt/${MODEL_SIZE}/fid_${q_bits}_${q_dim}.txt 2>&1
+# test_fid > results_txt/${MODEL_SIZE}/fid_${q_bits}_${q_dim}_use_diff_bits-${use_diff_bits}.txt 2>&1
 
 #DPG
 out_dir=${out_dir_root}/DPG_${sub_fix}
 img_fold=/home/jiaji_lu/AR/Infinity/${out_dir_root}/DPG_cfg3_tau1_cfg_insertion_layer0/images/dpg_images/
-# test_DPG > results_txt/${MODEL_SIZE}/DPG_${q_bits}_${q_dim}.txt 2>&1
+test_DPG > results_txt/${MODEL_SIZE}/DPG_${q_bits}_${q_dim}_use_diff_bits-${use_diff_bits}.txt 2>&1
 
 # python tools/fid_score.py /home/jiaji_lu/AR/Infinity/output/infinity_2b_evaluation/val_long_caption_fid_cfg3_tau1_cfg_insertion_layer0/pred /home/jiaji_lu/AR/Infinity/val2014 | tee log.txt
 
-# nohup ./scripts/eval.sh 2b 0 8 > running.txt 2>&1 &
-# model_weight GPU q_bits
+# nohup ./scripts/eval.sh 2b 0 8 False> running.txt 2>&1 &
+# model_weight GPU q_bits use_diff_bits

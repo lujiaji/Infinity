@@ -26,6 +26,7 @@ if __name__ == '__main__':
     parser.add_argument('--metadata_file', type=str, default='/home/jiaji_lu/AR/Infinity/evaluation/DPG/DPG_prompts.jsonl')
     parser.add_argument("--q_bits", type=int, default=8)
     parser.add_argument("--q_dim", type=str, default="per-head+per-dim")
+    parser.add_argument("--use_diff_bits", type=bool, default=False)
     args = parser.parse_args()
 
     os.makedirs(args.outdir,exist_ok=True)

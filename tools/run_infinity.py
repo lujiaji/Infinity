@@ -175,6 +175,7 @@ def load_infinity(
     checkpoint_type='torch',
     q_bits:int=8,
     q_dim:str='per-head+per-dim',
+    use_diff_bits=False,
 ):
     print(f'[Loading Infinity]')
     text_maxlen = 512
@@ -203,6 +204,7 @@ def load_infinity(
             train_h_div_w_list=[1.0],
             q_bits=q_bits,
             q_dim=q_dim,
+            use_diff_bits=use_diff_bits,
             **model_kwargs,
         ).to(device=device)
         print(f'[you selected Infinity with {model_kwargs=}] model size: {sum(p.numel() for p in infinity_test.parameters())/1e9:.2f}B, bf16={bf16}')
@@ -357,6 +359,7 @@ def load_transformer(vae, args):
         checkpoint_type=args.checkpoint_type,
         q_bits=args.q_bits,
         q_dim=args.q_dim,
+        use_diff_bits=args.use_diff_bits,
     )
     return infinity
 
